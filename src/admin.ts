@@ -95,7 +95,7 @@ export async function handleAdmin(request: Request, env: Env, path: string): Pro
     const input = await readJson<Partial<ClientKey> & { key?: string }>(request); const raw = input.key?.trim() || secureToken();
     if (raw.length < 24) return error("自定义密钥至少需要 24 个字符");
     const limitError = clientLimitsInputError(input); if (limitError) return error(limitError);
-    const keys = await getClientKeys(env); const item: ClientKey = { id: crypto.randomUUID(), name: input.name || "未命名密钥", hash: await sha256(raw), prefix: `${raw.slice(0, 10)}…${raw.slice(-4)}`, enabled: true, createdAt: new Date().toISOString(), ...normalizeClientLimits(input) };
+    const keys = await getClientKeys(env); const item: ClientKey = { id: crypto.randomUUID(), name: input.name || "未命名密钥", hash: await sha256(raw), key: raw, prefix: `${raw.slice(0, 10)}…${raw.slice(-4)}`, enabled: true, createdAt: new Date().toISOString(), ...normalizeClientLimits(input) };
     keys.push(item); await saveClientKeys(env, keys); const { hash, ...safe } = item; return json({ ...safe, key: raw }, 201);
   }
   const keyMatch = path.match(/^\/admin\/keys\/([^/]+)$/);
@@ -106,7 +106,12 @@ export async function handleAdmin(request: Request, env: Env, path: string): Pro
     const limitFields = ["requestsPerMinute", "dailyRequestLimit", "monthlyTokenLimit", "maxOutputTokensPerRequest"] as const;
     const normalized = normalizeClientLimits(input);
     const limitPatch = Object.fromEntries(limitFields.filter((field) => Object.hasOwn(input, field)).map((field) => [field, normalized[field]]));
-    keys[index] = { ...keys[index], name: input.name?.trim() || keys[index].name, enabled: input.enabled ?? keys[index].enabled, ...limitPatch };
+    let keyUpdate: Partial<ClientKey> = {};
+    if (input.key && typeof input.key === "string" && input.key.trim().length >= 24) {
+      const raw = input.key.trim();
+      keyUpdate = { key: raw, hash: await sha256(raw), prefix: `${raw.slice(0, 10)}…${raw.slice(-4)}` };
+    }
+    keys[index] = { ...keys[index], name: input.name?.trim() || keys[index].name, enabled: input.enabled ?? keys[index].enabled, ...limitPatch, ...keyUpdate };
     await saveClientKeys(env, keys); const { hash, ...safe } = keys[index]; return json(safe);
   }
   if (keyMatch && request.method === "DELETE") { const keys = await getClientKeys(env); await saveClientKeys(env, keys.filter((key) => key.id !== keyMatch[1])); return new Response(null, { status: 204 }); }

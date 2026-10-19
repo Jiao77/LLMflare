@@ -1,11 +1,22 @@
 import { handleAdmin } from "./admin";
-import { cloudflareAccountId, enabledProviderModels, internalModelId, messagesToChat, proxyOpenAICompatible, publicModelId, runWorkersAI, workersAIBaseUrl } from "./providers";
+import {
+  cloudflareAccountId,
+  enabledProviderModels,
+  internalModelId,
+  messagesToChat,
+  proxyOpenAICompatible,
+  publicModelId,
+  runWorkersAI,
+  workersAIBaseUrl,
+  chatToMessagesPayload,
+  chatToResponsesPayload,
+} from "./providers";
 import { authenticateClient, getProviders } from "./store";
 import { chatStreamToMessages, chatStreamToResponses } from "./streaming";
 import type { Env, GatewayRequest, Provider } from "./types";
 import { instrumentUsageResponse } from "./usage";
 import { enforceClientLimits } from "./limits";
-import { bearer, cors, error, json, readJson } from "./utils";
+import { bearer, cors, error, HttpError, json, readJson } from "./utils";
 
 const NVIDIA_MESSAGES_FIRST_BYTE_TIMEOUT_MS = 60_000;
 const MAX_UPSTREAM_ERROR_BYTES = 16_384;
@@ -141,9 +152,8 @@ async function gateway(request: Request, env: Env, ctx: ExecutionContext, path: 
       else if (body.stream) response = shape === "messages" ? chatStreamToMessages(upstream, body.model) : chatStreamToResponses(upstream, body.model);
       else {
         const data = await upstream.json<Record<string, unknown>>();
-        const choices = data.choices as Array<{ message?: { content?: string } }> | undefined; const text = choices?.[0]?.message?.content || "";
-        if (shape === "responses") response = json({ id: data.id || `resp_${crypto.randomUUID()}`, object: "response", status: "completed", model: data.model, output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }], output_text: text, usage: data.usage }, upstream.status, { "x-llm-provider": provider.id });
-        else response = json({ id: data.id, type: "message", role: "assistant", model: data.model, content: [{ type: "text", text }], stop_reason: "end_turn", usage: data.usage }, upstream.status, { "x-llm-provider": provider.id });
+        if (shape === "responses") response = json(chatToResponsesPayload(data), upstream.status, { "x-llm-provider": provider.id });
+        else response = json(chatToMessagesPayload(data), upstream.status, { "x-llm-provider": provider.id });
       }
     }
   }
@@ -166,13 +176,35 @@ export default {
     const url = new URL(request.url); let response: Response;
     try {
       if (request.method === "OPTIONS") response = new Response(null, { status: 204 });
-      else if (url.pathname === "/health") response = json({ ok: true, service: "llmflare" });
+      else if (url.pathname === "/health") {
+        const check = url.searchParams.get("check");
+        if (check === "ready" || check === "readiness") {
+          const checks: Record<string, string> = {};
+          let ok = true;
+          try {
+            await env.USAGE.prepare("SELECT 1").first();
+            checks.d1 = "ready";
+          } catch (e) {
+            checks.d1 = `error: ${e instanceof Error ? e.message : String(e)}`;
+            ok = false;
+          }
+          checks.kv = env.CONFIG ? "ready" : "missing";
+          if (checks.kv !== "ready") ok = false;
+          response = json({ ok, service: "llmflare", ...checks }, ok ? 200 : 503);
+        } else {
+          response = json({ ok: true, service: "llmflare" });
+        }
+      }
       else if (url.pathname.startsWith("/admin/")) response = await handleAdmin(request, env, url.pathname);
       else if (["/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1/message", "/v1/models"].includes(url.pathname)) response = await gateway(request, env, ctx, url.pathname);
       else response = await env.ASSETS.fetch(request);
     } catch (cause) {
-      console.error(JSON.stringify({ event: "request_error", path: url.pathname, message: cause instanceof Error ? cause.message : String(cause) }));
-      response = error(cause instanceof Error ? cause.message : "内部错误", 500, "gateway_error");
+      if (cause instanceof HttpError) {
+        response = error(cause.message, cause.status, cause.type);
+      } else {
+        console.error(JSON.stringify({ event: "request_error", path: url.pathname, message: cause instanceof Error ? cause.message : String(cause) }));
+        response = error(cause instanceof Error ? cause.message : "内部错误", 500, "gateway_error");
+      }
     }
     return cors(request, response);
   }

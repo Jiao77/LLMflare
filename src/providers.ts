@@ -422,3 +422,108 @@ export function messagesToChat(body: GatewayRequest): GatewayRequest {
   if (Array.isArray(body.stop_sequences)) clean.stop = body.stop_sequences;
   return { ...clean, n: 1, messages: system ? [{ role: "system", content: chatContent(system) }, ...messages] : messages, max_tokens: body.max_tokens ?? body.max_output_tokens, stream: body.stream };
 }
+
+export function chatToMessagesPayload(data: Record<string, unknown>): Record<string, unknown> {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const choice = (choices[0] && typeof choices[0] === "object" ? choices[0] : {}) as Record<string, unknown>;
+  const message = (choice.message && typeof choice.message === "object" ? choice.message : {}) as Record<string, unknown>;
+  const rawText = typeof message.content === "string" ? message.content : "";
+  const content: Array<Record<string, unknown>> = [];
+  if (rawText) {
+    content.push({ type: "text", text: rawText });
+  }
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  for (const rawTool of toolCalls) {
+    if (!rawTool || typeof rawTool !== "object") continue;
+    const tool = rawTool as Record<string, unknown>;
+    const fn = (tool.function && typeof tool.function === "object" ? tool.function : {}) as Record<string, unknown>;
+    const name = typeof fn.name === "string" ? fn.name : "";
+    let input: Record<string, unknown> = {};
+    if (typeof fn.arguments === "string" && fn.arguments.trim()) {
+      try {
+        const parsed = JSON.parse(fn.arguments);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) input = parsed as Record<string, unknown>;
+      } catch {}
+    }
+    content.push({
+      type: "tool_use",
+      id: typeof tool.id === "string" ? tool.id : `tool_${crypto.randomUUID()}`,
+      name,
+      input,
+    });
+  }
+  if (!content.length) {
+    content.push({ type: "text", text: "" });
+  }
+  const finishReason = choice.finish_reason;
+  let stop_reason = "end_turn";
+  if (finishReason === "length") stop_reason = "max_tokens";
+  else if (finishReason === "tool_calls" || finishReason === "function_call" || toolCalls.length > 0) stop_reason = "tool_use";
+  else if (finishReason === "content_filter") stop_reason = "refusal";
+
+  const rawUsage = (data.usage && typeof data.usage === "object" ? data.usage : {}) as Record<string, unknown>;
+  const inputTokens = typeof rawUsage.prompt_tokens === "number" ? rawUsage.prompt_tokens : (typeof rawUsage.input_tokens === "number" ? rawUsage.input_tokens : 0);
+  const outputTokens = typeof rawUsage.completion_tokens === "number" ? rawUsage.completion_tokens : (typeof rawUsage.output_tokens === "number" ? rawUsage.output_tokens : 0);
+
+  return {
+    id: typeof data.id === "string" ? data.id : `msg_${crypto.randomUUID()}`,
+    type: "message",
+    role: "assistant",
+    model: typeof data.model === "string" ? data.model : "",
+    content,
+    stop_reason,
+    stop_sequence: null,
+    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+  };
+}
+
+export function chatToResponsesPayload(data: Record<string, unknown>): Record<string, unknown> {
+  const choices = Array.isArray(data.choices) ? data.choices : [];
+  const choice = (choices[0] && typeof choices[0] === "object" ? choices[0] : {}) as Record<string, unknown>;
+  const message = (choice.message && typeof choice.message === "object" ? choice.message : {}) as Record<string, unknown>;
+  const text = typeof message.content === "string" ? message.content : "";
+  const output: Array<Record<string, unknown>> = [];
+  if (text) {
+    output.push({
+      id: `msg_${crypto.randomUUID()}`,
+      type: "message",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text, annotations: [] }],
+    });
+  }
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  for (const rawTool of toolCalls) {
+    if (!rawTool || typeof rawTool !== "object") continue;
+    const tool = rawTool as Record<string, unknown>;
+    const fn = (tool.function && typeof tool.function === "object" ? tool.function : {}) as Record<string, unknown>;
+    const callId = typeof tool.id === "string" ? tool.id : `call_${crypto.randomUUID()}`;
+    output.push({
+      id: callId,
+      type: "function_call",
+      status: "completed",
+      call_id: callId,
+      name: typeof fn.name === "string" ? fn.name : "",
+      arguments: typeof fn.arguments === "string" ? fn.arguments : "{}",
+    });
+  }
+  if (!output.length) {
+    output.push({
+      id: `msg_${crypto.randomUUID()}`,
+      type: "message",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "", annotations: [] }],
+    });
+  }
+  const status = choice.finish_reason === "content_filter" ? "failed" : "completed";
+  return {
+    id: typeof data.id === "string" ? data.id : `resp_${crypto.randomUUID()}`,
+    object: "response",
+    status,
+    model: typeof data.model === "string" ? data.model : "",
+    output,
+    output_text: text,
+    usage: data.usage,
+  };
+}

@@ -17,20 +17,20 @@
 
 ## P1 · 协议正确性
 
-- [ ] 补齐非流式 Responses 与 Messages 的工具调用、结束原因和 usage 字段转换。
+- [x] 补齐非流式 Responses 与 Messages 的工具调用、结束原因和 usage 字段转换。
 - [ ] 增加真实 Provider 的受控端到端兼容测试，覆盖 Chat、Responses、Messages、流式与函数工具。
 - [ ] 对未知或不支持的协议字段返回明确错误，避免静默丢弃关键能力。
 
 ## P1 · 请求安全
 
-- [ ] 对无 `Content-Length` 的 JSON 请求实施流式字节限制，并把超限响应规范为 HTTP 413。
+- [x] 对无 `Content-Length` 的 JSON 请求实施流式字节限制，并把超限响应规范为 HTTP 413。
 - [ ] 增加请求字段运行时校验，限制自定义 Provider 类型、URL 协议和异常参数范围。
 
 ## P2 · 网关可靠性
 
 - [ ] 增加统一首字节和完整请求超时，不再只对 NVIDIA Messages 设置特殊超时。
 - [ ] 增加可配置重试、熔断、Provider 健康状态和同模型故障转移。
-- [ ] 区分存活检查与依赖就绪检查，让 `/health` 能反映关键绑定状态。
+- [x] 区分存活检查与依赖就绪检查，让 `/health` 能反映关键绑定状态。
 
 ## P2 · 开源交付
 

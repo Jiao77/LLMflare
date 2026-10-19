@@ -28,6 +28,7 @@ export interface ClientKey {
   id: string;
   name: string;
   hash: string;
+  key?: string;
   prefix: string;
   enabled: boolean;
   createdAt: string;

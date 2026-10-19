@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-08-27T08:53:13.297Z",
+  "generatedAt": "2026-10-19T20:54:08.163Z",
   "models": [
     "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+    "@cf/cloudflare/clairic",
+    "@cf/cloudflare/clef",
+    "@cf/cloudflare/clef-flash",
+    "@cf/cloudflare/clef-omni",
+    "@cf/daily-co/phonellm-mini-alpha-2",
     "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
     "@cf/deepseek-ai/deepseek-v4-flash-0731",
     "@cf/deepseek-ai/deepseek-v4-pro-0813",
@@ -28,8 +33,11 @@
     "@cf/qwen/qwen3-30b-a3b-fp8",
     "@cf/qwen/qwen3.8-27b",
     "@cf/qwen/qwq-32b",
+    "@cf/swiss-ai/apertus-v1.5-8b",
+    "@cf/utter-project/eurollm-9b-it",
     "@cf/zai-org/glm-4.7-flash",
     "@cf/zai-org/glm-5.2",
+    "@cf/zai-org/glm-5.3",
     "@cf/zai-org/glm-5.3-flash"
   ]
 }

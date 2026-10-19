@@ -1,5 +1,12 @@
 const encoder = new TextEncoder();
 
+export class HttpError extends Error {
+  constructor(public readonly status: number, message: string, public readonly type = "invalid_request_error") {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
 export function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
 }
@@ -31,9 +38,50 @@ export async function timingSafeEqual(left: string, right: string): Promise<bool
 }
 
 export async function readJson<T>(request: Request, maxBytes = 1_000_000): Promise<T> {
-  const length = Number(request.headers.get("content-length") || 0);
-  if (length > maxBytes) throw new Error("请求体超过 1 MB 限制");
-  return request.json<T>();
+  const lengthHeader = request.headers.get("content-length");
+  if (lengthHeader) {
+    const length = Number(lengthHeader);
+    if (Number.isFinite(length) && length > maxBytes) {
+      throw new HttpError(413, "请求体超过 1 MB 限制", "request_too_large");
+    }
+  }
+  if (!request.body) {
+    throw new HttpError(400, "请求体不能为空");
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let done = false;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) {
+        done = true;
+        break;
+      }
+      bytes += result.value.byteLength;
+      if (bytes > maxBytes) {
+        throw new HttpError(413, "请求体超过 1 MB 限制", "request_too_large");
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    if (!done) {
+      await reader.cancel().catch(() => undefined);
+    }
+  }
+  const merged = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(merged);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new HttpError(400, "请求体不是有效的 JSON 格式");
+  }
 }
 
 export function cors(request: Request, response: Response): Response {
