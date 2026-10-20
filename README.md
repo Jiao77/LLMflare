@@ -310,3 +310,7 @@ OpenCode Zen 的免费额度可能与官方客户端、请求来源或反滥用�
 
 - GitHub: https://github.com/Jiao77/LLMflare
 - Gitea: https://gitea.jiao77.com/Jiao77/llmflare
+
+## 鸣谢
+
+- [LINUX DO](https://linux.do/)：真诚、友善、团结、专业的开源与技术讨论社区。
