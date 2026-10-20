@@ -11,6 +11,7 @@ outputs/
 output/
 *.log
 *.png
+!docs/images/*
 *.jpg
 *.jpeg
 *.webp
