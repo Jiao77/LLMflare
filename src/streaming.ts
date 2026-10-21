@@ -389,6 +389,7 @@ class ChatToResponsesMapper implements SseMapper {
 class WorkersAIToChatMapper implements SseMapper {
   private readonly id = `chat_${crypto.randomUUID()}`;
   private done = false;
+  private finished = false;
 
   constructor(private readonly model: string) {}
 
@@ -401,7 +402,10 @@ class WorkersAIToChatMapper implements SseMapper {
       this.done = true;
       return [`data: ${JSON.stringify({ error: payload.error })}\n\n`];
     }
-    if (Array.isArray(payload.choices)) return [`data: ${JSON.stringify(payload)}\n\n`];
+    if (Array.isArray(payload.choices)) {
+      if (payload.choices.some((item) => typeof object(item)?.finish_reason === "string")) this.finished = true;
+      return [`data: ${JSON.stringify(payload)}\n\n`];
+    }
     const output: string[] = [];
     if (typeof payload.response === "string" && payload.response) {
       output.push(`data: ${JSON.stringify({ id: this.id, object: "chat.completion.chunk", model: this.model, choices: [{ index: 0, delta: { content: payload.response }, finish_reason: null }] })}\n\n`);
@@ -418,7 +422,11 @@ class WorkersAIToChatMapper implements SseMapper {
   end(): string[] {
     if (this.done) return [];
     this.done = true;
-    return [`data: ${JSON.stringify({ id: this.id, object: "chat.completion.chunk", model: this.model, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`];
+    const frames = this.finished
+      ? []
+      : [`data: ${JSON.stringify({ id: this.id, object: "chat.completion.chunk", model: this.model, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`];
+    frames.push("data: [DONE]\n\n");
+    return frames;
   }
 }
 

@@ -258,6 +258,64 @@ describe("cross-protocol gateway streaming", () => {
     expect(run).toHaveBeenCalledWith("@cf/test/model", expect.objectContaining({ stream: true }));
   });
 
+  it("preserves Workers AI choice frames and appends [DONE] after finish_reason", async () => {
+    const workersProvider: Provider = { id: "workers-1", name: "Workers", type: "workers-ai", enabled: true, models: ["@cf/test/model"], enabledModels: ["@cf/test/model"] };
+    const env = await environment(workersProvider);
+    const frames = [
+      { id: "chat_cf", model: "@cf/test/model", choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] },
+      { id: "chat_cf", model: "@cf/test/model", choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] },
+      { choices: [], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } },
+    ];
+    const run = vi.fn(async () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(frames.map((frame) => "data: " + JSON.stringify(frame) + "\n\n").join("")));
+        controller.close();
+      },
+    }));
+    Object.assign(env, { AI: { run } });
+
+    const response = await requestWithEnvironment("/v1/chat/completions", {
+      model: "Workers/@cf/test/model",
+      messages: [{ role: "user", content: "hi" }],
+    }, env);
+    const text = await response.text();
+    const data = text.split(/\r?\n/).filter((line) => line.startsWith("data: ")).map((line) => line.slice(6));
+
+    expect(data[data.length - 1]).toBe("[DONE]");
+    expect((text.match(/"finish_reason":"stop"/g) ?? [])).toHaveLength(1);
+    expect(text).toContain('"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}');
+    expect(run).toHaveBeenCalledWith("@cf/test/model", expect.objectContaining({ stream: true }));
+  });
+
+  it("preserves Workers AI tool calls when finish_reason arrives before EOF", async () => {
+    const workersProvider: Provider = { id: "workers-1", name: "Workers", type: "workers-ai", enabled: true, models: ["@cf/test/model"], enabledModels: ["@cf/test/model"] };
+    const env = await environment(workersProvider);
+    const frames = [
+      { id: "chat_tool_cf", model: "@cf/test/model", choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_cf", type: "function", function: { name: "lookup", arguments: "" } }] }, finish_reason: null }] },
+      { id: "chat_tool_cf", model: "@cf/test/model", choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":' } }] }, finish_reason: "tool_calls" }] },
+      { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
+    ];
+    const run = vi.fn(async () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(frames.map((frame) => "data: " + JSON.stringify(frame) + "\n\n").join("")));
+        controller.close();
+      },
+    }));
+    Object.assign(env, { AI: { run } });
+
+    const response = await requestWithEnvironment("/v1/messages", {
+      model: "Workers/@cf/test/model",
+      messages: [{ role: "user", content: "look it up" }],
+      tools: [{ name: "lookup", description: "Lookup", input_schema: { type: "object", properties: { q: { type: "string" } } } }],
+      tool_choice: { type: "auto" },
+    }, env);
+    const text = await response.text();
+
+    expect(text).toContain('"type":"tool_use","id":"call_cf","name":"lookup"');
+    expect(text).toContain('"stop_reason":"tool_use"');
+    expect(run).toHaveBeenCalledWith("@cf/test/model", expect.objectContaining({ stream: true }));
+  });
+
   it("does not turn a streamed Workers AI error into a successful completion", async () => {
     const workersProvider: Provider = { id: "workers-1", name: "Workers", type: "workers-ai", enabled: true, models: ["@cf/test/model"], enabledModels: ["@cf/test/model"] };
     const env = await environment(workersProvider);
