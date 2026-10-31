@@ -66,12 +66,17 @@ export async function enforceClientLimits(env: Env, ctx: ExecutionContext, key: 
   if (outputError) return outputError;
 
   if (key.dailyRequestLimit || key.monthlyTokenLimit) {
+    const includeEstimates: unknown = env.MONTHLY_QUOTA_INCLUDE_ESTIMATES;
+    if (includeEstimates !== undefined && includeEstimates !== "true" && includeEstimates !== "false" && includeEstimates !== true && includeEstimates !== false) {
+      throw new Error("MONTHLY_QUOTA_INCLUDE_ESTIMATES 必须为 true 或 false");
+    }
+    const tokenColumn = includeEstimates === "false" || includeEstimates === false ? "known_tokens" : "total_tokens";
     const dayStart = now - 86_400_000;
     const monthStart = utcMonthStart(now);
     const totals = await env.USAGE.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END), 0) AS daily_requests,
-        COALESCE(SUM(CASE WHEN created_at >= ? THEN total_tokens ELSE 0 END), 0) AS monthly_tokens
+        COALESCE(SUM(CASE WHEN created_at >= ? THEN ${tokenColumn} ELSE 0 END), 0) AS monthly_tokens
       FROM usage_events
       WHERE client_key_id = ? AND created_at >= ?
     `).bind(dayStart, monthStart, key.id, Math.min(dayStart, monthStart)).first<UsageTotals>();

@@ -7,6 +7,7 @@ interface TokenUsage {
 }
 
 interface UsageMeasurement extends TokenUsage {
+  knownTokens: number;
   firstTokenMs: number | null;
   durationMs: number;
   outputTps: number | null;
@@ -140,15 +141,15 @@ async function writeUsage(env: UsageWriterEnv, event: UsageEvent, measurement: U
     INSERT INTO usage_events (
       id, created_at, client_key_id, endpoint, provider_id, provider_name, provider_type,
       model, status, latency_ms, input_tokens, output_tokens, total_tokens, streaming,
-      first_token_ms, duration_ms, output_tps, usage_source, completed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      first_token_ms, duration_ms, output_tps, usage_source, completed, known_tokens
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     crypto.randomUUID(), Date.now(), event.clientKeyId, event.endpoint, event.providerId,
     event.providerName, event.providerType, event.model, event.status,
     measurement.firstTokenMs ?? measurement.durationMs, measurement.inputTokens,
     measurement.outputTokens, measurement.totalTokens, event.streaming ? 1 : 0,
     measurement.firstTokenMs, measurement.durationMs, measurement.outputTps,
-    measurement.usageSource, measurement.completed ? 1 : 0,
+    measurement.usageSource, measurement.completed ? 1 : 0, measurement.knownTokens,
   ).run();
 }
 
@@ -161,7 +162,7 @@ export function instrumentUsageResponse(env: UsageWriterEnv, ctx: ExecutionConte
   const startedAt = event.startedAt;
   if (!response.body) {
     const durationMs = Math.max(0, Date.now() - startedAt);
-    logWrite(env, ctx, event, { inputTokens: inputEstimate, outputTokens: 0, totalTokens: inputEstimate, firstTokenMs: null, durationMs, outputTps: null, usageSource: "estimated", completed: true });
+    logWrite(env, ctx, event, { inputTokens: inputEstimate, outputTokens: 0, totalTokens: inputEstimate, knownTokens: 0, firstTokenMs: null, durationMs, outputTps: null, usageSource: "estimated", completed: true });
     return response;
   }
 
@@ -225,6 +226,7 @@ export function instrumentUsageResponse(env: UsageWriterEnv, ctx: ExecutionConte
     }
     const durationMs = Math.max(0, Date.now() - startedAt);
     const firstTokenMs = firstTokenAt !== null ? Math.max(0, firstTokenAt - startedAt) : firstByteAt !== null ? Math.max(0, firstByteAt - startedAt) : null;
+    const knownTokens = exact.totalTokens ?? (exact.inputTokens ?? 0) + (exact.outputTokens ?? 0);
     let inputTokens = exact.inputTokens;
     let outputTokens = exact.outputTokens;
     if (exact.totalTokens !== null && inputTokens !== null && outputTokens === null) outputTokens = Math.max(0, exact.totalTokens - inputTokens);
@@ -236,7 +238,7 @@ export function instrumentUsageResponse(env: UsageWriterEnv, ctx: ExecutionConte
     const generationMs = firstTokenMs === null ? durationMs : Math.max(1, durationMs - firstTokenMs);
     const tpsWindowMs = event.protocolAdapted ? Math.max(1, durationMs) : generationMs;
     const outputTps = outputTokens > 0 ? Number((outputTokens / (tpsWindowMs / 1000)).toFixed(2)) : null;
-    logWrite(env, ctx, event, { inputTokens, outputTokens, totalTokens, firstTokenMs, durationMs, outputTps, usageSource: hasExact ? mixed ? "mixed" : "exact" : "estimated", completed });
+    logWrite(env, ctx, event, { inputTokens, outputTokens, totalTokens, knownTokens, firstTokenMs, durationMs, outputTps, usageSource: hasExact ? mixed ? "mixed" : "exact" : "estimated", completed });
   };
 
   const monitored = new ReadableStream<Uint8Array>({

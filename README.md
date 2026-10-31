@@ -240,6 +240,9 @@ npx wrangler d1 create llmflare-usage
   "name": "llmflare",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-25",
+  "vars": {
+    "MONTHLY_QUOTA_INCLUDE_ESTIMATES": "true"
+  },
   "kv_namespaces": [
     { "binding": "CONFIG", "id": "YOUR_KV_NAMESPACE_ID" }
   ],
@@ -270,6 +273,18 @@ npx wrangler deploy
 `ADMIN_TOKEN` 是后台管理员凭据。不要提交到 Git、写进前端代码，或与客户端访问密钥混用。
 
 新增迁移后应再次执行同一条 `d1 migrations apply` 命令。客户端限制达到阈值时返回 HTTP 429；月度 Token 按 UTC 自然月统计，过去 24 小时请求限制采用滚动窗口。Token 限制依据已完成请求的统计，因此并发中的请求可能造成少量超额；如需严格财务上限，仍应同时在上游 Provider 关闭 Pay-as-you-go 或设置消费上限。
+
+#### 月度 Token 配额是否包含估算
+
+部署变量 `MONTHLY_QUOTA_INCLUDE_ESTIMATES` 控制估算是否用于月度 Token 限额，未配置时默认开启：
+
+- `"true"`：已知用量和估算用量都计入配额。
+- `"false"`：只将已知用量计入配额；部分用量未知时，已知部分仍计入。看板中的估算、总 Token 和 TPS 不变。
+- 支持字符串或布尔值 `true` / `false`；其他值会使配额检查报错，而不会静默关闭保护。
+
+将示例配置中的值改为 `"false"` 即可关闭。开关适用于所有 Provider、流式和非流式请求，不影响每日请求数、每分钟请求数或单次输出限制。关闭后，不报告用量的上游不受完整的月度 Token 配额约束，应同时配置请求数限制或上游消费上限。
+
+更新已有部署时，必须先应用 `0004_known_tokens.sql` 迁移，再部署新 Worker。迁移保留历史精确用量；历史 `mixed` 记录无法可靠区分已知和估算部分，因此关闭估算时不计入这些旧记录。切换开关会重新按当前策略计算本月已有记录，不会修改看板数据。
 
 ### 4. 绑定域名（可选）
 
