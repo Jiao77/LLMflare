@@ -80,6 +80,7 @@ describe("stream instrumentation", () => {
     expect(writes[0][12]).toBe(8);
     expect(writes[0][17]).toBe("exact");
     expect(writes[0][18]).toBe(1);
+    expect(writes[0][19]).toBe(8);
   });
 
   it("includes first-token latency in TPS for protocol-adapted responses", async () => {
@@ -99,5 +100,20 @@ describe("stream instrumentation", () => {
     expect(writes[0][14]).toBe(3_000);
     expect(writes[0][15]).toBe(4_000);
     expect(writes[0][16]).toBe(0.75);
+  });
+});
+
+describe("known token accounting", () => {
+  it("records zero known tokens for a response without a body", async () => {
+    const writes: unknown[][] = [];
+    const env = { USAGE: { prepare: () => ({ bind: (...values: unknown[]) => ({ run: async () => { writes.push(values); } }) }) } };
+    const pending: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (promise: Promise<unknown>) => { pending.push(promise); } } as ExecutionContext;
+    const event: UsageEvent = { clientKeyId: "key", endpoint: "/v1/chat/completions", providerId: "provider", providerName: "Groq", providerType: "groq", model: "model", status: 204, startedAt: Date.now(), streaming: false, protocolAdapted: false };
+    const monitored = instrumentUsageResponse(env, ctx, new Response(null, { status: 204 }), event, { messages: [{ role: "user", content: "Hello" }] });
+    expect(monitored.status).toBe(204);
+    await Promise.all(pending);
+    expect(writes[0][12]).toBeGreaterThan(0);
+    expect(writes[0][19]).toBe(0);
   });
 });

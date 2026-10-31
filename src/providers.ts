@@ -1,5 +1,6 @@
 import type { Env, GatewayMessage, GatewayRequest, Provider } from "./types";
 import { chatStreamToMessages, chatStreamToResponses, workersAIStreamToChat } from "./streaming";
+import { extractTokenUsage } from "./usage";
 import { error, json } from "./utils";
 
 type ModelRecord = Record<string, unknown>;
@@ -355,10 +356,17 @@ export async function runWorkersAI(env: Env, provider: Provider, body: GatewayRe
     return chat;
   }
   const text = workersResultText(result);
+  const tokens = extractTokenUsage(result);
+  const usage = {
+    ...(tokens.inputTokens !== null ? { [shape === "chat" ? "prompt_tokens" : "input_tokens"]: tokens.inputTokens } : {}),
+    ...(tokens.outputTokens !== null ? { [shape === "chat" ? "completion_tokens" : "output_tokens"]: tokens.outputTokens } : {}),
+    ...(tokens.totalTokens !== null ? { total_tokens: tokens.totalTokens } : {}),
+  };
+  const usagePayload = Object.keys(usage).length ? { usage } : {};
   const id = `gw_${crypto.randomUUID()}`;
-  if (shape === "responses") return json({ id, object: "response", status: "completed", model, output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }], output_text: text });
-  if (shape === "messages") return json({ id, type: "message", role: "assistant", model, content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 0, output_tokens: 0 } });
-  return json({ id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
+  if (shape === "responses") return json({ id, object: "response", status: "completed", model, output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text }] }], output_text: text, ...usagePayload });
+  if (shape === "messages") return json({ id, type: "message", role: "assistant", model, content: [{ type: "text", text }], stop_reason: "end_turn", ...usagePayload });
+  return json({ id, object: "chat.completion", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], ...usagePayload });
 }
 
 export function messagesToChat(body: GatewayRequest): GatewayRequest {
